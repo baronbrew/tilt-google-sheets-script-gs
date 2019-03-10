@@ -35,21 +35,18 @@ function doPost(e){
 function testBeer(){
   var e = {
   "parameter": {
-  "Beer": "some regular beer",
+  "Beer": "Test,7333",
   "Temp": 65,
   "SG":1.050,
   "Color":"BLUE",
-  "Comment":"noahbaron@gmail.com",
-  "Timepoint":42728.4267217361
+  "Comment":"",
+  "Timepoint":43486.6
   }
   };
   handleResponse(e);
 }
 
 function handleResponse(e) {
-  //prevent simultaneous writes
-  var lock = LockService.getScriptLock();
-  lock.waitLock(60000);
   try {
     // next set where we write the data - you could write to multiple/alternate destinations 
     var masterDoc = SpreadsheetApp.openById(SCRIPT_PROP.getProperty("key"));
@@ -79,6 +76,10 @@ function handleResponse(e) {
     if(beerId == null){
       //check if comment field has an @ symbol for an email address
       if (comment.indexOf("@") > -1){
+      //prevent simultaneous writes
+      var lock = LockService.getScriptLock();
+      lock.waitLock(60000);
+      nextBeerRow = (beersSheet.getLastRow()+1).toFixed(0);
       var settingsSheet = masterDoc.getSheetByName("Settings");
       var sheetTemplate = settingsSheet.getRange("B1").getValue();
       var driveTemplate = DriveApp.getFileById(sheetTemplate); //file ID of template
@@ -86,32 +87,60 @@ function handleResponse(e) {
       driveDoc.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       doc = SpreadsheetApp.open(driveDoc);
       beerId = doc.getId();
-      //add beer to 'Beers' tab
       doclongURL = doc.getUrl();
       beerName[1] = nextBeerRow;
-      beersSheet.appendRow(["",beerId,doc.getUrl()]);
-      beersSheet.getRange("A" + nextBeerRow).setNumberFormat('@STRING@');
-      beersSheet.getRange("A" + nextBeerRow).setValue(beerName.join());
+      try { 
       driveDoc.addEditor(comment);
+      sharedWith = comment + '<br>Important: Check email for invitation to edit if not a Gmail address.';
+      var editors = doc.getEditors();
       MailApp.sendEmail({to : comment,
                          replyTo : "info@baronbrew.com",
                          subject : "Tilt™ Hydrometer Log for " + beerName[0],
-                         body : 'View and edit your data here with Google Sheets: ' + doclongURL + ". To log data to the same sheet using another Tilt Pi, enter the following name as your beer name: " + beerName.toString() + " (Be sure to include comma and number afterward.)",
+                         body : 'View and edit your data here with Google Sheets: ' + doclongURL + " To log data to the same sheet using another device, enter the following name as your beer name: " + beerName.toString() + " (Be sure to include comma and number afterward.)",
                          name : "Tilt Customer Service",
-                        });
-                           
+                        });                
       e.parameter.Comment = "";
       }
+      catch (shareError) { 
+      sharedWith = 'View access only. (Gmail address not entered.)';
+      }
+      finally {
+        //send email to non-gmail account
+      if ( sharedWith == 'View access only. (Gmail address not entered.)' && comment != '@' ) {
+      MailApp.sendEmail({to : comment,
+                         replyTo : "info@baronbrew.com",
+                         subject : "Tilt™ Hydrometer Log for " + beerName[0],
+                         body : 'View your data here with Google Sheets (edit access requires a Gmail account): ' + doclongURL + " To log data to the same sheet using another device, enter the following name as your beer name: " + beerName.toString() + " (Be sure to include comma and number afterward.)",
+                         name : "Tilt Customer Service",
+                     });
+      e.parameter.Comment = "";
+      }
+        if ( comment == '@' ) {
+          e.parameter.Comment = "";
+        }
+      //add beer to 'Beers' tab
+      beersSheet.appendRow(["",beerId,doc.getUrl()]);
+      beersSheet.getRange("A" + nextBeerRow).setNumberFormat('@STRING@');
+      beersSheet.getRange("A" + nextBeerRow).setValue(beerName.join());
+      SpreadsheetApp.flush();
+      lock.releaseLock();
+      }
+    }
       else{
        //advise user to enter email into comment field
       return ContentService
-      .createTextOutput(JSON.stringify({result:"</br>" + beerName[0] + "</br><strong>TILT | " + tiltColor + "</strong></br>Enter your GMAIL email address as a comment below to start a new brew log.", beername:beerName.toString(), tiltcolor:tiltColor}))
+      .createTextOutput(JSON.stringify({result:beerName[0] + "<br><strong>TILT | " + tiltColor + '</strong><br>Start a new cloud log by entering your email address as a comment.', beername:beerName.toString(), tiltcolor:tiltColor}))
           .setMimeType(ContentService.MimeType.JSON);
     }
   }
     else{
       doc = SpreadsheetApp.openById(beerId);
       var editors = doc.getEditors();
+      if ( editors.length == 1 ) {
+           sharedWith = 'View access only. Check email for invitation to edit.';
+      } else {
+        sharedWith = editors[1].getEmail();
+      }
       doclongURL = doc.getUrl();
       //check if comment field has a web address prefix used to transmit link to raspberry pi
       if (comment.indexOf("http") > -1){
@@ -124,7 +153,6 @@ function handleResponse(e) {
         e.parameter.Comment = "";
       }
     }
- 
     var sheet = doc.getSheetByName("Data");    
     e.parameter.Beer = beerName[0]; //remove beer name unique identifier when posting to sheet
     // we'll assume header is in row 1 but you can override with header_row in GET/POST data
@@ -143,18 +171,20 @@ function handleResponse(e) {
     sheet.getRange(nextRow, 1, 1, row.length).setValues([row]);
     // return success results
     return ContentService
-    .createTextOutput(JSON.stringify({result:"</br>" + beerName.toString() + "</br><strong>TILT | " + tiltColor + "</strong></br>Success logging data to the cloud. (row: " + nextRow + ")", beername:beerName.toString(), tiltcolor:tiltColor, doclongurl:doclongURL}))
-          .setMimeType(ContentService.MimeType.JSON);
+    .createTextOutput(JSON.stringify({result: beerName.toString() + '<br><strong>TILT | ' + tiltColor + '</strong><br>Success logging to the cloud. (row: ' + nextRow + ')<br><a class="link external" href="' + doclongURL + '">View Cloud Log</a><br>Edit access: ' + sharedWith, beername:beerName.toString(), tiltcolor:tiltColor, doclongurl:doclongURL}))
+    .setMimeType(ContentService.MimeType.JSON);
   } catch(e){
     // if error return this
     return ContentService
-          .createTextOutput(JSON.stringify({result:"error", error: e}))
-          .setMimeType(ContentService.MimeType.JSON);
-  } finally { //release lock
-    lock.releaseLock();
-  }
+    .createTextOutput(JSON.stringify({result: JSON.stringify(e), error: e}))
+    .setMimeType(ContentService.MimeType.JSON);
+  } finally { //release lock if it still exists
+    if (lock !== undefined){
+     SpreadsheetApp.flush();
+     lock.releaseLock();
+    }
 }
-
+}
 
 
 function onOpen() {
@@ -163,7 +193,7 @@ function onOpen() {
     .addItem('View Cloud URL', 'menuItemURL')
     .addItem('Email Cloud URL', 'menuItemEmailURL')
     .addToUi();
-  if(SCRIPT_PROP.getProperty("url")==null){
+  if(SCRIPT_PROP.getProperty("url") == null){
     setup();
   }
 }
@@ -171,37 +201,41 @@ function onOpen() {
 function setup() {
   var doc = SpreadsheetApp.getActiveSpreadsheet();
   SCRIPT_PROP.setProperty("key", doc.getId());
-  
-    var html = HtmlService.createHtmlOutputFromFile('setup')
-      .setTitle('Cloud Setup Instructions')
-      .setWidth(300);
-  SpreadsheetApp.getUi() // Or DocumentApp or FormApp.
-      .showSidebar(html);
 }
 
 function menuItemURL() {
- 
-  if(ScriptApp.getService().getUrl()!=null){
     SCRIPT_PROP.setProperty("url", ScriptApp.getService().getUrl());
      SpreadsheetApp.getUi()
-      .alert("Copy/Paste the following URL into the Cloud URL field in the Tilt app settings: " + ScriptApp.getService().getUrl());
-  }
-  else{
-    SpreadsheetApp.getUi()
-      .alert("Follow setup instructions in sidebar to deploy as web app");
-  }
-  
+      .alert("Copy/Paste the following URL into the Cloud URL field in the Tilt app settings: " + ScriptApp.getService().getUrl());  
 }
 
 function menuItemEmailURL(){
-  if(ScriptApp.getService().getUrl()!=null){
     SCRIPT_PROP.setProperty("url", ScriptApp.getService().getUrl());  
     MailApp.sendEmail(Session.getActiveUser().getEmail(), 'Tilt Cloud URL', "Copy/Paste the following URL into the Cloud URL field in the Tilt app settings: " + ScriptApp.getService().getUrl());
     SpreadsheetApp.getUi()
       .alert("Email sent to: " + Session.getActiveUser().getEmail());
-  }
-  else{
-    SpreadsheetApp.getUi()
-      .alert("Follow setup instructions in sidebar to deploy as web app");
-  }
 }
+  
+  function updateChart(){
+    //currently unused - update minimum values in chart to set appropriate range based on units preferred. Run when new sheet created.
+  var reportSheet = doc.getSheetByName("Report");
+  var chartSheet = doc.getSheetByName("Chart");
+  var gravityUnits = reportSheet.getRange("B6").getValue();
+  var tempUnits = reportSheet.getRange("B5").getValue();
+  var chart = chartSheet.getCharts()[0];
+  if (gravityUnits == "SG"){
+    var gMin = 0.990;
+  }else{
+    var gMin = -5.0;
+  }
+  if (tempUnits == "Fahrenheit"){
+    var tempMin = 25;
+  }else{
+    var tempMin = -5;
+  }
+  chart = chart.modify()
+  .asLineChart()
+  .setOption('vAxes', {0 : {viewWindow : {min: gMin}}, 1 : {viewWindow: {min: tempMin}}})
+  .build();
+  chartSheet.updateChart(chart);
+   }
