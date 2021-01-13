@@ -35,12 +35,12 @@ function doPost(e){
 function testBeer(){
   var e = {
   "parameter": {
-  "Beer": "Test,7333",
-  "Temp": 65,
-  "SG":1.050,
+  "Beer": "Sandbox Test,41550",
+  "Temp": 64,
+  "SG":1.045,
   "Color":"BLUE",
   "Comment":"",
-  "Timepoint":43486.6
+  "Timepoint":44160.11
   }
   };
   handleResponse(e);
@@ -54,25 +54,25 @@ function handleResponse(e) {
     var nextBeerRow = (beersSheet.getLastRow()+1).toFixed(0);
     //app expects beer name to be followed by a comma and beer ID (except for new beers)
     var beerName = e.parameter.Beer.split(",");
+    var tiltColor= e.parameter.Color;
+    var comment = e.parameter.Comment;
+    var email = null;
+    var doclongURL = "";
+    var beerId = null;
+    var doc = null;
     //if beer name is blank, give beer a default name
     if (beerName[0] == "") {
       beerName[0] = "Untitled";
     }
-    var tiltColor= e.parameter.Color;
-    var comment = e.parameter.Comment;
-    var beerIds = beersSheet.getRange("A:C").getValues();
-    var beerId = null;
-    var email = null;
-    var doclongURL = "";
-    //get Sheets ID if it exists
-    for (var i = 0; i < beerIds.length; i++) {
-        if (e.parameter.Beer.toLowerCase() == beerIds[i][0].toLowerCase()) {
-            beerId = beerIds[i][1];
+    //if beer number is blank, probably a new beer and check if email address in comment
+    if (beerName[1] !== undefined){
+    var beerIds = beersSheet.getRange("A" + beerName[1] + ":" + "C" + beerName[1]).getValues();
+       //get Sheets ID if beer name matches
+      if (e.parameter.Beer.toLowerCase() == beerIds[0][0].toLowerCase()) {
+            beerId = beerIds[0][1];
         }
-    }
-    
-    var doc = null;
-    //check if this is a new beer or existing beer
+     }
+    //check if this is a new beer and process as needed
     if(beerId == null){
       //check if comment field has an @ symbol for an email address
       if (comment.indexOf("@") > -1){
@@ -119,9 +119,11 @@ function handleResponse(e) {
           e.parameter.Comment = "";
         }
       //add beer to 'Beers' tab
-      beersSheet.appendRow(["",beerId,doc.getUrl()]);
+      var beerNameString = beerName.join();
+      beersSheet.appendRow([beerNameString,beerId,doc.getUrl()]);
+      //work around in case a number is entered as a beer name
       beersSheet.getRange("A" + nextBeerRow).setNumberFormat('@STRING@');
-      beersSheet.getRange("A" + nextBeerRow).setValue(beerName.join());
+      beersSheet.getRange("A" + nextBeerRow).setValue(beerNameString);
       SpreadsheetApp.flush();
       lock.releaseLock();
       }
